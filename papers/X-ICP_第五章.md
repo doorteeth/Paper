@@ -1,0 +1,243 @@
+# V 可定位性检测模块（Loc.-Module）
+
+> 对照原文：Tuna et al., *X-ICP*, T-RO 2024, Section V。
+>
+> 本地查看公式：用浏览器打开同目录 `X-ICP_第五章.html`。
+
+本节按图 3 的信息流说明 Loc.-Module。可定位性检测的目标是：度量对应点里有多少信息，从而正确找出欠约束方向。
+
+三步：
+
+1. **信息分析（Fig. 3-A）**：看 Hessian 与环境几何信息的关系  
+2. **滤波（Fig. 3-B）**：去掉冗余贡献  
+3. **分类（Fig. 3-C）**：细粒度判定每个主方向的可定位性  
+
+对应搜索完成后，匹配点被变回 **LiDAR 系 \(\mathtt{L}\)**，以免地图物理尺寸放大旋转特征向量的可定位性。后续分析都在该坐标系中进行。
+
+---
+
+## V-A 信息分析
+
+### V-A1 主成分分析
+
+从优化 Hessian 的特征值分析开始。point-to-plane ICP 的 Hessian 即第三章式 (3) 中的 \(\boldsymbol{A}'\)。按优化变量 \(\boldsymbol{x}=[\boldsymbol{r};\boldsymbol{t}]\) 把它写成块：
+
+$$
+\boldsymbol{A}'
+=
+\begin{bmatrix}
+\boldsymbol{A}'_{rr} & \boldsymbol{A}'_{rt} \\
+\boldsymbol{A}'_{tr} & \boldsymbol{A}'_{tt}
+\end{bmatrix}_{6\times 6}
+$$
+
+- \(\boldsymbol{A}'_{rr}\in\mathbb{R}^{3\times 3}\)：只含旋转信息  
+- \(\boldsymbol{A}'_{tt}\in\mathbb{R}^{3\times 3}\)：只含平移信息  
+
+ICP 的 Jacobian 也分成两块：平移用 \(\boldsymbol{n}\)，旋转用 \(\boldsymbol{p}\times\boldsymbol{n}\)。
+
+\(\boldsymbol{t}\in\mathbb{R}^{3}\) 与 \(\boldsymbol{r}\in\mathfrak{so}(3)\) 尺度和类型都不同，不宜混在一起做特征分解。因此 **SVD 只分别对 \(\boldsymbol{A}'_{tt}\) 和 \(\boldsymbol{A}'_{rr}\) 做**。若对整块 \(6\times 6\) Hessian 做特征分析，旋转/平移的尺度差会让“免启发式”的可定位性阈值很难设。
+
+分解结果：
+
+$$
+\boldsymbol{A}'_{tt} = \boldsymbol{V}_{t}\Sigma_{t}\boldsymbol{V}_{t}^{\top},
+\qquad
+\boldsymbol{A}'_{rr} = \boldsymbol{V}_{r}\Sigma_{r}\boldsymbol{V}_{r}^{\top}
+$$
+
+\(\boldsymbol{V}_{t},\boldsymbol{V}_{r}\in\mathbb{R}^{3\times 3}\) 是特征向量矩阵；\(\Sigma_{t},\Sigma_{r}\) 是对应特征值的对角阵。
+
+直观上，特征值度量沿该特征向量的信息量。但如第 II 节所述，特征值随环境、传感器变化不稳定，**本文不直接用特征值做可定位性判定**。
+
+### V-A2 信息对的贡献
+
+每个信息对定义为 \(\big({}_{\mathtt{L}}\boldsymbol{p},\ {}_{\mathtt{L}}\boldsymbol{n}\big)\)。需要一个关系，说明这对点–法向对优化代价贡献了多少。
+
+Gelfand 等 [38] 指出：这些贡献的平方和能较好估计 Hessian 的特征值，说明基于 Jacobian 的可定位性与特征值相关。与 [38, 39, 63] 类似，X-ICP **直接用 Jacobian 的元素**（而不是 Hessian），由式 (2) 可见这样更简单，也便于在不同环境部署，同时仍与优化 Jacobian 相关。
+
+#### 与经典力学的类比
+
+优化 Jacobian 度量每个信息对局部产生的 **wrench（力和力矩）**：
+
+- 力：\(\boldsymbol{n}\)  
+- 力矩：\(\boldsymbol{\tau}=\boldsymbol{p}\times\boldsymbol{n}\)  
+
+图 4 用 2D 示意：两面垂直墙加一段半圆墙。地图系 \(\mathtt{M}\) 不必与环境主方向（如 \(\boldsymbol{v}_{t_1}\)）对齐，因为检测在优化特征空间中进行，与机器人相对环境的朝向无关。
+
+不同 \((\boldsymbol{p}_i,\boldsymbol{n}_i)\) 对各主方向的贡献不同。例如 \(\boldsymbol{n}_{1,2,3}\) 因 \(\boldsymbol{n}_{1,2,3}\cdot\boldsymbol{v}_{t_1}>0\)，给平移特征方向 \(\boldsymbol{v}_{t_1}\) 提供贡献；\(\boldsymbol{n}_4\) 则没有。绕地图 \(z\) 轴的旋转贡献则有 \(\tau_1>\tau_3>\tau_2\approx 0\)。
+
+力矩若不归一化，就不能作为可泛化的可定位性参数：\(\boldsymbol{p}\) 可以离原点任意远，力矩会被放大，换一个环境就失效。
+
+**图 4：** 可定位性贡献的 2D 例子。绿箭头为 \(\boldsymbol{p}\)，蓝箭头为 \(\boldsymbol{n}\)，红点为 LiDAR 中心；橙色为某个特征向量的方向；并画出三对点–法向的力矩 \(\boldsymbol{\tau}\)。
+
+Kwok 与 Tang [39] 比较过 ICP 里不同归一化。对**求 ICP 解**而言，最大范数归一化优于力矩归一化或平均范数归一化 [38]，因为对应之间的空间关系对估计很重要。但对**逐点可定位性贡献**，点的模长不应直接改变贡献值。因此本文采用 **moment normalization（力矩归一化）**，把力矩映到单位球上，见式 (5)。
+
+各力矩归一化后，把所有信息对堆成信息矩阵：
+
+**式 (5)**
+
+$$
+\boldsymbol{\mathcal{F}}_{r}
+=
+\begin{bmatrix}
+\dfrac{\boldsymbol{p}_1\times\boldsymbol{n}_1}{\|\boldsymbol{p}_1\times\boldsymbol{n}_1\|_2} \\
+\vdots \\
+\dfrac{\boldsymbol{p}_N\times\boldsymbol{n}_N}{\|\boldsymbol{p}_N\times\boldsymbol{n}_N\|_2}
+\end{bmatrix}
+\in\mathbb{R}^{N\times 3}
+$$
+
+$$
+\boldsymbol{\mathcal{F}}_{t}
+=
+\begin{bmatrix}
+\boldsymbol{n}_1^{\top} \\
+\vdots \\
+\boldsymbol{n}_N^{\top}
+\end{bmatrix}
+\in\mathbb{R}^{N\times 3}
+$$
+
+\(\boldsymbol{\mathcal{F}}_{r}\) 是旋转信息矩阵，\(\boldsymbol{\mathcal{F}}_{t}\) 是平移信息矩阵。可定位性用不平方的线性项 \(\boldsymbol{p}\times\boldsymbol{n}\) 和 \(\boldsymbol{n}\)，避免平方把贡献的尺度压扁。
+
+数值稳定：若 \(\lvert\boldsymbol{\tau}\rvert\) 接近 0（法向与点几乎平行），丢掉该信息对。图 4 中 \(\boldsymbol{p}_2,\boldsymbol{n}_2\) 就是这种情况。另外，**只有 \(\lvert\boldsymbol{\tau}\rvert\ge 1\) 才做力矩归一化**，避免把球内很小的力矩放大到单位球上，否则 Loc.-Module 会过于乐观。
+
+#### 可定位性贡献
+
+可定位性定义在优化的特征空间，因此对每个特征向量方向都能算，检测不受 LiDAR / 机器人相对环境朝向的影响。把式 (5) 的信息矩阵投影到平移、旋转 Hessian 的特征空间：
+
+**式 (6)**
+
+$$
+\boldsymbol{\mathcal{I}}_{r} = \big(\boldsymbol{\mathcal{F}}_{r}\boldsymbol{V}_{r}\big)^{|\cdot|},
+\qquad
+\boldsymbol{\mathcal{I}}_{t} = \big(\boldsymbol{\mathcal{F}}_{t}\boldsymbol{V}_{t}\big)^{|\cdot|}
+$$
+
+\(\boldsymbol{\mathcal{I}}_{r},\boldsymbol{\mathcal{I}}_{t}\in\mathbb{R}^{N\times 3}\) 是所有信息对在各特征向量上的贡献。\((\cdot)^{|\cdot|}\) 表示逐元素取绝对值。
+
+某个标量 \(\mathcal{I}(i,j)\)：
+
+- \(=1\)：该点对该特征方向贡献最大（完全对齐）  
+- \(=0\)：无贡献  
+
+图 3-A 给出某一平移特征向量的贡献直方图：多数贡献很小，但在 \(1.0\) 附近有一个高峰，说明存在一小块很强的结构。点对贡献还要经过滤波、汇总，才能给 Hessian 的特征向量分类。
+
+---
+
+## V-B 滤波
+
+把式 (6) 拼成
+
+$$
+\boldsymbol{\mathcal{I}} = [\boldsymbol{\mathcal{I}}_{r}\ \boldsymbol{\mathcal{I}}_{t}] \in \mathbb{R}^{N\times 6}
+$$
+
+滤波的目标：去掉冗余，让剩下的信息可解释。
+
+### V-B1 滤掉低贡献
+
+图 3-A 红色区域是低贡献，会淹没分析。贡献太小会与测量噪声、法向提取噪声分不清。用逐元素二值滤波做外点剔除：
+
+**式 (7)**
+
+$$
+\boldsymbol{\mathcal{I}}'_{c}(i,j)
+=
+\begin{cases}
+\boldsymbol{\mathcal{I}}(i,j), & \text{若 }\boldsymbol{\mathcal{I}}(i,j)\ge\kappa_f \\
+0, & \text{否则}
+\end{cases}
+$$
+
+\(i=1,\ldots,N\)，\(j=1,\ldots,6\)。\(\kappa_f\) 是第一个需按传感器调整的参数（刻画传感器与特征提取噪声）。
+
+- 全部 Velodyne 实验：\(\kappa_f=\cos 80^\circ\approx 0.1736\)  
+- Seemühle 的 Ouster OS0-128：噪声更大，\(\kappa_f=\cos 60^\circ=0.5\)（对齐角大于 \(60^\circ\) 的贡献丢掉）
+
+### V-B2 再分出高贡献
+
+把通过 \(\kappa_f\) 的贡献加起来，得到该方向上的综合几何信息：
+
+**式 (8)**
+
+$$
+\boldsymbol{\mathcal{L}}_{c}(j)=\sum_{i=1}^{N}\boldsymbol{\mathcal{I}}'_{c}(i,j)
+$$
+
+\(\boldsymbol{\mathcal{L}}_{c}\in\mathbb{R}^{1\times 6}\) 是 6 个方向的**综合贡献**。通过滤波的点越多，信息越多。\(\boldsymbol{\mathcal{I}}'_{c}\) 里仍有弱但可靠的贡献，部分可定位时还用得上。
+
+要更细地分级，还需要“最强贡献”。几何上，对齐角小于 \(45^\circ\) 视为强贡献，即阈值 \(\cos 45^\circ\approx 0.707\)。图 3-B：内层绿锥是强对齐，外层黄锥是弱对齐。
+
+**式 (9)**
+
+$$
+\boldsymbol{\mathcal{I}}'_{s}(i,j)
+=
+\begin{cases}
+\boldsymbol{\mathcal{I}}'_{c}(i,j), & \text{若 }\boldsymbol{\mathcal{I}}'_{c}(i,j)\ge\cos 45^\circ \\
+0, & \text{否则}
+\end{cases}
+$$
+
+$$
+\boldsymbol{\mathcal{L}}_{s}(j)=\sum_{i=1}^{N}\boldsymbol{\mathcal{I}}'_{s}(i,j)
+$$
+
+\(\boldsymbol{\mathcal{L}}_{s}\) 是**强贡献**向量。它同样随点数增加，但对传感器噪声更不敏感，主要受错误对应影响。下一步用 \(\boldsymbol{\mathcal{L}}_{c}\) 和 \(\boldsymbol{\mathcal{L}}_{s}\) 做分类。
+
+---
+
+## V-C 分类
+
+如 IV-A，可定位性是离散类别。贡献本身可以是连续的，也可以当软约束加进优化目标；但去掉离散化后，要平衡各项代价，还可能违反约束。
+
+因此 X-ICP：**底层贡献保持连续，对外输出离散类别**。离散化后才能在最小二乘里加**硬约束**，从而避免沿约束方向发散。
+
+### 三个阈值
+
+| 参数 | 作用 |
+|------|------|
+| \(\kappa_1\) | 完全可定位的下限（安全阈值） |
+| \(\kappa_2\) | 可定位 → 部分可定位的过渡；也是部分可定位的上限 |
+| \(\kappa_3\) | 部分可定位 → 不可定位；覆盖“点很少但很强”的情况 |
+
+关系：\(\kappa_1\ge\kappa_2>\kappa_3\)。按所用 ICP 的收敛盆地来设。
+
+1. \(\kappa_1\) 隔开“可定位”与“部分/不可定位”，可以设得相当高。太高只会多花一点检测计算，部分可定位仍能用上已有信息。例：\(\kappa_1=250\) 表示至少要有约 250 个完全对齐的点对，才当 fully localizable。  
+2. \(\kappa_2\) 看系统鲁棒性与优化器，与 \(\kappa_3\) 一起决定如何处理部分可定位，取值在 \(\kappa_1\) 与 \(\kappa_3\) 之间。  
+3. \(\kappa_3\) 是部分可定位与不可定位的边界。\(\kappa_3=35\) 表示至少约 35 个采样点对，才做受控约束优化。
+
+\(\kappa_1\) 越大，退化检测越激进，额外计算很少。\(\kappa_2\) 划出不确定区（走部分可定位，要重采样对应，有计算开销）。\(\kappa_3\) 越小，系统越敢把弱方向当可定位，风险由用户决定。
+
+全文所有环境、传感器统一用：
+
+$$
+\kappa_1=250,\quad \kappa_2=180,\quad \kappa_3=35
+$$
+
+### 决策树（对每个特征向量单独做）
+
+输入：滤波后的贡献，以及该特征向量。对 6 个主方向各做一遍。
+
+**第一步：是否 `full`**
+
+- \(\boldsymbol{\mathcal{L}}_{c}\ge\kappa_1\)，或  
+- \(\boldsymbol{\mathcal{L}}_{s}\ge\kappa_2\)  
+
+任一成立 → \(\eta_{\boldsymbol{v}_j}=\textit{full}\)
+
+**第二步：否则看是否 `partial`**
+
+- \(\boldsymbol{\mathcal{L}}_{c}\ge\kappa_2\)，或  
+- \(\boldsymbol{\mathcal{L}}_{s}\ge\kappa_3\)  
+
+任一成立 → \(\eta_{\boldsymbol{v}_j}=\textit{partial}\)  
+否则 → \(\eta_{\boldsymbol{v}_j}=\textit{none}\)
+
+用 \(\boldsymbol{\mathcal{L}}_{s}\) 是为了抓住“点不多但对齐很强”的结构；用 \(\boldsymbol{\mathcal{L}}_{c}\) 是为了抓住“很多中等贡献加在一起也够”的情况。
+
+---
+
+到这里 Loc.-Module 输出式 (4) 的 \(\boldsymbol{\eta}\)。下一节 **VI Opt.-Module** 按这些类别加约束。
