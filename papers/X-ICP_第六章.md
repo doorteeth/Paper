@@ -1,0 +1,204 @@
+# VI 可定位性感知优化模块（Opt.-Module）
+
+> 对照原文：Tuna et al., *X-ICP*, T-RO 2024, Section VI。
+>
+> 本地查看公式：用浏览器打开同目录 `X-ICP_第六章.html`。
+
+Opt.-Module 负责在退化时**算出并使用额外约束**，使优化仍然可靠。总览见图 5。输入是 Loc.-Module 的类别 \(\boldsymbol{\eta}\) 和特征向量 \({}_{\mathtt{L}}\boldsymbol{v}_j\)，目标是即使问题病态，也求出尽可能好的 \(\boldsymbol{x}^*\)。
+
+- **VI-A 约束计算**：按每个可定位性类别构造约束  
+- **VI-B 约束优化**：把约束写进最小二乘  
+
+点云配准在**地图系 \(\mathtt{M}\)** 中进行，所以这一节的量也都在地图系。ICP 每一轮还要把特征向量转到地图系：
+
+$$
+\boldsymbol{R}_{\mathtt{M},\mathtt{L}_k}
+=
+\boldsymbol{R}_{\mathtt{M},\mathtt{L}_1}
+\cdot
+\boldsymbol{R}_{\mathtt{L}_1,\mathtt{L}_2}
+\cdots
+\boldsymbol{R}_{\mathtt{L}_{k-1},\mathtt{L}_k}
+$$
+
+\(k\) 是当前 ICP 迭代序号。
+
+**图 5：** 约束优化模块。i) 线性约束计算（约束是一张 3D 平面）；ii) 把这些约束用于优化。
+
+---
+
+## VI-A 约束计算
+
+线性等式约束有多种写法。这里要在病态方向上限制 3D 解空间（图 5-A）。被约束的特征向量与优化变量 \(\boldsymbol{t},\boldsymbol{r}\) 在同一几何坐标系。
+
+每个约束方向是 \(\boldsymbol{v}_{\{t,r\}_j}\)，\(j\in\{1,2,3\}\)；该方向上允许的位姿更新大小由 \(\boldsymbol{t}_0\) 或 \(\boldsymbol{r}_0\) 给出。约束为：
+
+**式 (10)**
+
+$$
+\boldsymbol{v}_{t_j}^{\top}(\boldsymbol{t}-\boldsymbol{t}_0)=0
+$$
+
+$$
+\boldsymbol{v}_{r_j}^{\top}(\boldsymbol{r}-\boldsymbol{r}_0)=0
+$$
+
+每一行都是一张 3D 平面：法向是特征向量 \(\boldsymbol{v}\)，平面过点 \(\boldsymbol{t}_0\) 或 \(\boldsymbol{r}_0\)。
+
+直观上，\(\boldsymbol{t}_0,\boldsymbol{r}_0\) 是**沿该特征向量方向上的位姿估计**。约束要求：沿 \(\boldsymbol{v}\) 的更新被钉在 \(\boldsymbol{t}_0\)（或 \(\boldsymbol{r}_0\)）上，最终解必须落在这张约束平面上（图 5-B）；垂直于 \(\boldsymbol{v}\) 的分量仍由正常 ICP 决定。
+
+### VI-A1 三类可定位性分别怎么约束
+
+| \(\eta_{\boldsymbol{v}_j}\) | 做法 |
+|----------------------|------|
+| **full** | 不加约束，正常优化 |
+| **none** | 令 \(\boldsymbol{t}_0=\boldsymbol{0}\) 或 \(\boldsymbol{r}_0=\boldsymbol{0}\)。沿该方向的 ICP 更新被抹掉，保持初值 |
+| **partial** | 从对应里重采样，算出有限的 \(\boldsymbol{t}_0\) 或 \(\boldsymbol{r}_0\)，限制沿 \(\boldsymbol{v}_j\) 的更新幅度 |
+
+### VI-A2 部分可定位：重采样再解一个简化最小二乘
+
+`partial` 时要重采样 ICP 对应 \(\mathcal{M}\)。用哪些点，取决于第五章的分类条件：
+
+- 若 \(\boldsymbol{\mathcal{L}}_c\ge\kappa_2\)：重用算 \(\boldsymbol{\mathcal{L}}_c\) 的那些信息对  
+- 否则若 \(\boldsymbol{\mathcal{L}}_s\ge\kappa_3\)：重用算 \(\boldsymbol{\mathcal{L}}_s\) 的那些信息对  
+- 两个都成立：用 \(\boldsymbol{\mathcal{L}}_c\) 那批  
+
+目标：挑出沿该特征向量**贡献最大**的对应，用它们解一个简化最小二乘，得到比较干净的 \(\boldsymbol{t}_0\) 或 \(\boldsymbol{r}_0\)。
+
+步骤：
+
+1. 取退化特征向量 \(\boldsymbol{v}_j\)，以及已算好的 \(\mathcal{L}_s,\mathcal{L}_c\)  
+2. 按上面两个不等式决定采样哪些点  
+3. 按可定位性贡献值选点（贡献定义见 V-A）  
+4. 若 \(\boldsymbol{v}_j\) 在平移子空间，解平移简化问题；若在旋转子空间，解旋转简化问题  
+
+**平移** \(\boldsymbol{v}_j\in\boldsymbol{V}_t\)，求 \(\boldsymbol{t}_0\)：
+
+$$
+{}^{re}\boldsymbol{A}_t = [{}^{re}\boldsymbol{n}][{}^{re}\boldsymbol{n}]^{\top}
+$$
+
+$$
+{}^{re}\boldsymbol{b}_t = [{}^{re}\boldsymbol{n}][{}^{re}\boldsymbol{n}]^{\top}({}^{re}\boldsymbol{q}-{}^{re}\boldsymbol{p})
+$$
+
+$$
+\min_{\boldsymbol{t}_0\in\mathbb{R}^{3}}
+\big\| {}^{re}\boldsymbol{A}_t\,\boldsymbol{t}_0 - {}^{re}\boldsymbol{b}_t \big\|_2
+$$
+
+重采样对应记为 \(\{{}^{re}\boldsymbol{p},\{{}^{re}\boldsymbol{n},{}^{re}\boldsymbol{q}\}\}\subset\mathcal{M}\)。这相当于**只用平移块**（法向 \(\boldsymbol{n}\)）做一次点到面最小二乘。
+
+**旋转** \(\boldsymbol{v}_j\in\boldsymbol{V}_r\)，求 \(\boldsymbol{r}_0\)：
+
+$$
+{}^{re}\boldsymbol{A}_r = [{}^{re}\boldsymbol{p}\times{}^{re}\boldsymbol{n}][{}^{re}\boldsymbol{p}\times{}^{re}\boldsymbol{n}]^{\top}
+$$
+
+$$
+{}^{re}\boldsymbol{b}_r = [{}^{re}\boldsymbol{p}\times{}^{re}\boldsymbol{n}][{}^{re}\boldsymbol{n}]^{\top}({}^{re}\boldsymbol{q}-{}^{re}\boldsymbol{p})
+$$
+
+$$
+\min_{\boldsymbol{r}_0\in\mathbb{R}^{3}}
+\big\| {}^{re}\boldsymbol{A}_r\,\boldsymbol{r}_0 - {}^{re}\boldsymbol{b}_r \big\|_2
+$$
+
+这相当于**只用旋转块**（力矩 \(\boldsymbol{p}\times\boldsymbol{n}\)）。
+
+\(\boldsymbol{t}_0\) 或 \(\boldsymbol{r}_0\) 就是：仅用这些更干净的对应，沿退化特征向量方向估出来的运动。第五章说部分可定位 = 该方向上信息稀少但仍有；重采样就是把噪声更小、更可靠的对应捞出来用。
+
+风险：故意只选“朝某一个方向有信息”的点，\({}^{re}\boldsymbol{A}_t,{}^{re}\boldsymbol{A}_r\) 本身可能病态。处理：
+
+1. 带 pivoting 的 LU 分解 [64]（换行使主元更大，提高精度）  
+2. 再加 RIF 预条件 [65]，减轻病态  
+
+另一种办法是再混入良约束方向上的点 [38] 来改善条件数，但更耗时，本文没做。若不做上述处理，重采样得到的约束可能不准，投影到特征向量后的残差还会拖累本来约束良好的方向。
+
+---
+
+## VI-B 约束优化
+
+把 \(\boldsymbol{t}_0,\boldsymbol{r}_0\) 写进原来的最小二乘。先把式 (10) 扩成 6 维：
+
+**式 (16)**
+
+$$
+[\boldsymbol{0}_{1\times 3},\ \boldsymbol{v}_j]\cdot\boldsymbol{x} = \boldsymbol{v}_j\cdot\boldsymbol{t}_0
+\qquad (\boldsymbol{v}_j\in\boldsymbol{V}_t)
+$$
+
+$$
+[\boldsymbol{v}_j,\ \boldsymbol{0}_{1\times 3}]\cdot\boldsymbol{x} = \boldsymbol{v}_j\cdot\boldsymbol{r}_0
+\qquad (\boldsymbol{v}_j\in\boldsymbol{V}_r)
+$$
+
+\(\boldsymbol{x}=[\boldsymbol{r};\boldsymbol{t}]\)。平移约束只作用在 \(\boldsymbol{x}\) 的后三维，旋转约束只作用在前三维。
+
+再写成 \(\boldsymbol{C}\boldsymbol{x}=\boldsymbol{d}\)。约束条数 = 所有 `none` 与 `partial` 的方向数，记平移 \(m_t\) 条、旋转 \(m_r\) 条，总数 \(c=m_t+m_r\le 6\)。
+
+$$
+\boldsymbol{C}_{(c\times 6)}\,\boldsymbol{x}
+=
+\boldsymbol{d}_{(c\times 1)}
+$$
+
+\(\boldsymbol{C}\) 的每一行是一个特征向量（另外半边补零）；\(\boldsymbol{d}\) 的对应分量是 \(\boldsymbol{v}_j\cdot\boldsymbol{t}_0\) 或 \(\boldsymbol{v}_j\cdot\boldsymbol{r}_0\)。
+
+于是问题变成带等式约束的最小二乘：
+
+**式 (23)**
+
+$$
+\min_{\boldsymbol{x}\in\mathbb{R}^{6}}
+\ \big\|\boldsymbol{A}'\boldsymbol{x}-\boldsymbol{b}'\big\|_2
+\qquad
+\text{s.t.}\quad
+\boldsymbol{C}\boldsymbol{x}-\boldsymbol{d}=\boldsymbol{0}
+$$
+
+引入拉格朗日乘子 \(\boldsymbol{\lambda}\in\mathbb{R}^{c}\) [66]，变成无约束的增广问题：
+
+**式 (24)**
+
+增广未知量
+
+$$
+\boldsymbol{x}'
+=
+\begin{bmatrix}
+\boldsymbol{x}^{*} \\
+\boldsymbol{\lambda}^{*}
+\end{bmatrix}
+$$
+
+KKT / 正规方程为：
+
+$$
+\begin{bmatrix}
+2\boldsymbol{A}^{\top}\boldsymbol{A} & \boldsymbol{C}^{\top} \\
+\boldsymbol{C} & \boldsymbol{0}
+\end{bmatrix}
+\begin{bmatrix}
+\boldsymbol{x}^{*} \\
+\boldsymbol{\lambda}^{*}
+\end{bmatrix}
+=
+\begin{bmatrix}
+2\boldsymbol{A}^{\top}\boldsymbol{b} \\
+\boldsymbol{d}
+\end{bmatrix}
+$$
+
+左上块就是原来的 Hessian（第三章的 \(\boldsymbol{A}'\) 一类量），右上 / 左下把约束嵌进去。用 SVD 求解，得到当前 ICP 迭代的最优位姿。图 5-B 画的是只有一条等式约束时的情形。
+
+**局限：** 初值真的很差时，Opt.-Module 也救不了。两个原因：
+
+1. 初值差 → 对应搜错  
+2. 完全退化时，不更新的方向直接用初值，配准会错  
+
+但本文所有对比方法用的是同一套初值，所以这一点对大家一样。
+
+---
+
+到这里，X-ICP 的两个核心模块都讲完了：第五章决定 \(\boldsymbol{\eta}\)，第六章按 \(\boldsymbol{\eta}\) 加平面约束并解 KKT。下一章是 **VII 实验**。

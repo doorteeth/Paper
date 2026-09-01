@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>X-ICP 第七章 · 实验结果</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      }
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+  <style>
+    body { max-width: 860px; margin: 2rem auto; padding: 0 1.25rem 3rem;
+      font-family: "Noto Serif SC","Source Han Serif SC","Songti SC",serif;
+      line-height: 1.75; color: #1a1a1a; background: #fafafa; }
+    h1,h2,h3,h4 { font-family: "Noto Sans SC","PingFang SC",sans-serif; }
+    h1 { font-size: 1.55rem; border-bottom: 1px solid #ddd; padding-bottom: .4rem; }
+    h2 { font-size: 1.22rem; margin-top: 2rem; }
+    h3 { font-size: 1.06rem; margin-top: 1.3rem; }
+    .note { background: #eef4ff; border-left: 4px solid #3b6fd8; padding: .75rem 1rem; margin: 1rem 0 1.5rem; font-size: .95rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+    th, td { border: 1px solid #ccc; padding: .4rem .55rem; text-align: left; }
+    th { background: #f0f0f0; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 2rem 0; }
+  </style>
+</head>
+<body>
+<h1>VII 实验结果</h1>
+<p class="note">对照原文：Tuna et al., *X-ICP*, T-RO 2024, Section VII。<br><br>本地查看：用浏览器打开同目录 `X-ICP_第七章.html`。图仍以论文 PDF 为准。</p>
+<p>本节先讲实验设置（VII-A），再在 VII-C 至 VII-F 评估性能。附件视频展示外场部署并概括框架。最后用消融实验（VII-G）验证各子模块是否有用。</p>
+<p>**图 6：** 三处真实场地。a) ANYmal 在 Seemühle 地下矿井（VII-D）；b) Rümlang 工地车载图，可见无特征平面（VII-E）；c) Opfikon 城市公园用 RTC360 [67] 采真值（VII-F）。</p>
+<hr />
+<h2>VII-A 硬件与实现</h2>
+<p>可定位性感知 ICP 接到 ANYbotics 修改过的 C++ 点云配准框架 [61]（基于 libpointmatcher [62]），以验证能否用于困难的真实任务。</p>
+<p>外场全部用 **ANYmal-C** [68]（图 1、图 6-a）：Velodyne VLP-16、IMU、关节编码器。配准与对应搜索的初值 \(\boldsymbol{T}_{\mathrm{ML,init}}\) 来自腿式里程计 [69]（IMU + 关节）。该里程计依赖足端接触估计，粗糙地面上会变差 [69]。点云去畸变在驱动层用同一套里程计位姿完成。评测电脑是 Intel i7-9750H，与机载算力相当。</p>
+<h2>VII-B 对比方法</h2>
+<p>为公平对比，Zhang et al. [12] 与 Hinduja et al. [17] 都重写进**同一套** ICP 流水线。Zhang 的特征值阈值经验取 **120**（除 VII-F Opfikon 外，那里会试多个阈值）。X-ICP 的 \(\kappa_{1,2,3}\) **全部实验同一套**，不按场景改。</p>
+<p>**图 7：** VII-C 三个仿真环境。黄=平移退化，蓝=旋转退化，红=机器人轨迹。A 组合退化，B 旋转退化，C 平移退化。A-1 检测出三轴退化；A-2 单轴平移退化；A-3 地图系与退化方向不对齐，说明必须在特征空间做检测。</p>
+<hr />
+<h2>VII-C 仿真</h2>
+<p>仿真里可以控制初值质量等变量。场景包含光滑平面、自相似走廊、圆柱房间、开阔地，都是会让 ICP 退化的条件。</p>
+<h3>VII-C1 纯平移退化</h3>
+<p>半圆隧道，沿纵向退化（图 7-C）。为避免过度依赖腿式里程计，所有方法的初值都加与速度有关的高斯噪声。例如速度 \(0.5\,\mathrm{m}\)、\(0.2\,\mathrm{rad}\) 时：平移 \(\mu_t=0,\sigma_t=0.0125\,\mathrm{m}\)，旋转 \(\mu_r=0,\sigma_r=0.005\,\mathrm{rad}\)。</p>
+<p>图 8：X-ICP 在噪声初值下仍正确检出**一根**退化轴；Zhang 误检成三根。Zhang 的地图沿隧道主方向误差和漂移更大。</p>
+<h3>VII-C2 纯旋转退化</h3>
+<p>圆柱房间（图 7-B），绕垂直于地面的轴存在已知旋转退化。同样加运动相关噪声。</p>
+<p>图 9：X-ICP 正确检出旋转退化，地图误差小；检出时段与机器人走近圆柱中心重合（绿色阴影）。Zhang 反而在靠近圆弧墙时报退化（错），说明它对观测点数很敏感。Zhang 地图误差也更大。</p>
+<h3>VII-C3 组合退化</h3>
+<p>图 7-A：走廊 → 开阔地 → 返回，共 \(246\,\mathrm{m}\)，标称速度 \(0.5\,\mathrm{m/s}\)。走廊预期单轴（沿走廊）退化；开阔地预期地面平行的两平移 + 垂直地面的一旋转。</p>
+<p>图 10：走廊段始终检出一根不可定位轴；额外两轴只在 200–300 s（开阔地）出现。此实验给三方法**完美初值**，以去掉初值误差。Hinduja 过于悲观，几乎全信先验，漂移小于 Zhang；Zhang 对旋转退化过于乐观，地图裂开（点 A 及阴影时段）。X-ICP 还用了 partial 信息，相对真值地图误差最小。</p>
+<hr />
+<h2>VII-D Seemühle 地下矿井</h2>
+<p>瑞士废弃矿井。难点：地面乱石、铁轨导致打滑，接触估计差，里程计先验差；长隧道拱壁光滑，沿隧道主方向几乎没有约束。Leica RTC360 扫真值地图与轨迹 [70]。同一机器人跑两次：VLP-16 与 Ouster OS0-128，总行程 \(521.8\,\mathrm{m}\)。</p>
+<h3>VII-D1 Velodyne VLP-16</h3>
+<p>图 1 下排误差热图：两个基线都无法无漂移走完。Zhang 回程进隧道前还接近 X-ICP，之后检测出错，出现 LiDAR-slip。图 11 下：Zhang 检测偏错且偏悲观。Hinduja 全程误差更大（图 11 中），过于悲观，过度信噪声里程计。</p>
+<p>X-ICP 隧道段配准稳定，地图误差低（图 1）。图 11 上：开头和结尾的隧道都被 Loc.-Module 抓住。机器人在转，但退化只作用在一根优化轴 \(\boldsymbol{v}_{t_1}\) 上——这正是特征空间检测的好处，不必对齐笛卡尔轴。隧道拐弯处（图 1 的 B）还能区分细微差别，让优化用上那一点信息。</p>
+<p>APE / RPE / 终点误差用 evo [71]。APE 看全局精度。表 I：对齐前 \(15\,\mathrm{m}\)（约 200 帧）或只对齐原点。</p>
+<p>**表 I** Seemühle VLP-16 的 APE（最优加粗）</p>
+<table>
+<tr><th></th><th>对齐前 15 m 平移 μ(σ)[m]</th><th>对齐前 15 m 旋转 μ(σ)[°]</th><th>对齐原点平移</th><th>对齐原点旋转</th><th>终点误差 [m]</th></tr>
+<tr><td>**X-ICP**</td><td>**2.05(1.23)**</td><td>**2.55(0.76)**</td><td>**2.45(1.35)**</td><td>**2.50(1.03)**</td><td>**0.27**</td></tr>
+<tr><td>Zhang [12]</td><td>3.36(1.74)</td><td>4.06(1.37)</td><td>3.73(1.80)</td><td>4.11(1.52)</td><td>6.37</td></tr>
+<tr><td>Hinduja [17]</td><td>5.79(5.26)</td><td>7.67(4.72)</td><td>8.16(4.83)</td><td>8.03(4.73)</td><td>24.17</td></tr>
+</table>
+<p>基线全局漂了；X-ICP 终点只差 0.27 m。</p>
+<p>**表 II** 每走 \(10\,\mathrm{m}\) 的 RPE（局部一致性）</p>
+<table>
+<tr><th></th><th>平移 μ(σ)[m]</th><th>旋转 μ(σ)[°]</th></tr>
+<tr><td>**X-ICP**</td><td>**0.17(0.12)**</td><td>**0.86(0.42)**</td></tr>
+<tr><td>Zhang</td><td>0.20(0.14)</td><td>0.93(0.51)</td></tr>
+<tr><td>Hinduja</td><td>0.26(0.14)</td><td>1.28(0.74)</td></tr>
+</table>
+<h3>VII-D2 Ouster OS0-128</h3>
+<p>点更密、视场更大。噪声更大，故 \(\kappa_f\) 改为 \(60^\circ\)。图 12：三方法都比 VLP-16 好。Hinduja 仍有可见漂移；Zhang 能走完且无明显大漂；X-ICP 洞穴内部点到点误差更小。</p>
+<p>隧道段 X-ICP 仍能抓住退化，Hinduja 仍偏悲观。Zhang 这次在隧道里**几乎检不出退化**（和 VLP-16 时不同）。Nubert 等 [14] 指出 OS0-128 点数多会把特征值抬大，Zhang 的阈值必须重调。</p>
+<hr />
+<h2>VII-E Rümlang 工地</h2>
+<p>大型工地：地面平面上平移欠约束，垂直地面的旋转也欠约束（图 6-b 无结构平面）。行程 \(153\,\mathrm{m}\)：车库旁出发 → 开阔地原地转几圈（考 yaw）→ 返回。</p>
+<p>图 13：Zhang 用单一特征值阈值同时管旋转和平移，两子空间尺度差很大，表现差。Hinduja 在这种高度退化场景反而更好——检测悲观，更信腿式里程计；平水泥地上里程计还行，但地图刚性结构发虚，是先验漂移攒出来的。X-ICP 地图细、一致。</p>
+<p>图 14：\(\mathcal{L}_c\) 随时间变化，橙色阴影是可定位性模块真正介入的区间。三根退化轴的综合贡献明显偏低。\(\mathcal{L}_s\) 显示 \(\boldsymbol{v}_{r_1}\) 多数时候是 **partial**（强贡献峰超过 \(\kappa_3=35\)）。X-ICP 不仅检出开阔地三根不可定位轴，还能抓住 partial 与 none 之间的平滑过渡。</p>
+<hr />
+<h2>VII-F Opfikon 城市公园</h2>
+<p>自然场景，\(235\,\mathrm{m}\)，软土和吊桥，腿式里程计差；植被让法向难提；后段公园中心开阔无结构。真值地图 RTC360（图 15）。</p>
+<p>Zhang 的阈值这次特意改成 **200**（不再是 120），图 17 说明阈值一差地图就差，必须启发式调参。</p>
+<p>图 16 放大树丛：X-ICP 最细、最准。Hinduja 过悲观，噪声先验下漂得明显。Zhang 即使用调过的阈值，树那一段仍看得出 LiDAR 退化。结论：人造与自然环境都支持“少启发式的可定位性感知配准”。</p>
+<hr />
+<h2>VII-G 消融</h2>
+<p>**Xs-ICP**：简化版。去掉 partial，令 \(\kappa_1\ge\kappa_2=\kappa_3\)（\(\kappa_1=250,\kappa_2=180\)），变成和 [12,17] 类似的**二值**检测。决策树只比 \(\mathcal{L}_c\ge\kappa_1\) 与 \(\mathcal{L}_s\ge\kappa_3\)。并且 **只在 ICP 第一轮做分类**；完整 X-ICP **每轮都分类**。</p>
+<h3>VII-G1 Seemühle</h3>
+<p>图 18：关掉 partial 后位姿漂移变大，说明三级比两级有用。第二次过隧道时，X-ICP 在退化轴上以 partial 为主，Xs-ICP 判成 none、完全信先验。</p>
+<p>**表 III APE（Seemühle VLP-16）**</p>
+<table>
+<tr><th></th><th>对齐 15 m 平移</th><th>对齐 15 m 旋转</th><th>对齐原点平移</th><th>对齐原点旋转</th><th>终点 [m]</th></tr>
+<tr><td>**X-ICP**</td><td>**2.05(1.23)**</td><td>**2.55(0.76)**</td><td>**2.45(1.35)**</td><td>**2.50(1.03)**</td><td>**0.27**</td></tr>
+<tr><td>Xs-ICP</td><td>2.29(1.22)</td><td>3.06(1.19)</td><td>2.68(1.26)</td><td>3.08(1.3)</td><td>5.34</td></tr>
+</table>
+<p>**表 IV RPE / 10 m**</p>
+<table>
+<tr><th></th><th>平移</th><th>旋转</th></tr>
+<tr><td>**X-ICP**</td><td>**0.17(0.12)**</td><td>0.86(0.42)</td></tr>
+<tr><td>Xs-ICP</td><td>0.19(0.13)</td><td>**0.85(0.47)**</td></tr>
+</table>
+<p>旋转差不多，平移 X-ICP 明显更好；APE 和终点误差也一直是 X-ICP 更好（终点 0.27 m vs 5.34 m）。</p>
+<h3>VII-G2 Rümlang</h3>
+<p>图 19：两版建图都还能看，但 Xs-ICP 墙是双影，旋转略偏。partial 在这里也有帮助。点 A 的直方图：两根黄箭头是不可定位平移，蓝箭头是部分可定位旋转（少量但很强的信息对）。</p>
+<h3>VII-G3 计算时间与可扩展性</h3>
+<p>图 20：每轮 ICP 里检测开销随对应点数变化。真实部署最常见是 1 轴或 3 轴退化。Xs-ICP 不重采样，曲线覆盖所有退化情况。16 线到 128 线都能实时。Xs-ICP 比 X-ICP 更省。</p>
+<p>Rümlang 上单线程 scan-to-map 总时间（表 V）：</p>
+<table>
+<tr><th></th><th>X-ICP μ(σ) [ms]</th><th>Xs-ICP</th><th>基线*</th></tr>
+<tr><td>i9-13900K</td><td>12.65 (3.51)</td><td>11.14 (3.1)</td><td>11.1 (1.45)</td></tr>
+<tr><td>i7-9750H（机载级）</td><td>**32.19 (10.7)**</td><td>29.42 (9.35)</td><td>20.05 (2.21)</td></tr>
+</table>
+<p>\*基线统计只取实验前 150 s，以免退化把基线时间搅乱。</p>
+<p>无退化时，X-ICP / Xs-ICP 相对基线的额外开销可以忽略。ANYmal 上平均 32 ms，实时够用。</p>
+<hr />
+<p>读实验时抓住三条：</p>
+<ol><li>Zhang：单一特征值阈值，点数一变（Ouster）或旋转/平移尺度一混就失效。  </li><li>Hinduja：偏悲观，先验好时还行，先验差（矿井、公园）就漂。  </li><li>X-ICP：同一套 \(\kappa\)，三级分类 + 每轮重判；partial 在消融里被证明有用。</li></ol>
+</body>
+</html>
