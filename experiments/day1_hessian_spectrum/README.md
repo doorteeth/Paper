@@ -22,4 +22,4 @@ python3 compute_spectrum.py
 
 能用自己的话解释：为什么走廊里 \(v_{t,\min}\) 指向前方，以及为什么机器人转 45° 后这个向量会变、但仍然沿隧道。
 
-不要改 FAST-LIO，不要开始 Day 2。
+下一目录：`experiments/day2_forecast_hessian/`。不要改 FAST-LIO。
