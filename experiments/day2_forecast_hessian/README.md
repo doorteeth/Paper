@@ -1,33 +1,33 @@
-# Day 2 — 预测 Hessian + 有界局部地图
+# Day 2 — 预测 Hessian（地图球 ≥ 量程）
 
-不要读论文。跑脚本，对照终端里的 Verdict 和 `out/forecast_lmin.png`。
+上一版用 `R_map < R_sensor` 人为造出「看得见、地图没有」。那和常见 SLAM 相反。本版改成：
+
+- 量程 \(R_{\mathrm{sensor}}=15\,\mathrm{m}\)
+- 局部地图球 \(R_{\mathrm{map}}=20\,\mathrm{m}\)（**不小于**量程）
+- 弹出：只留最近 `WINDOW=4 s` 的关键帧（8 m 车程），不是更小的半径
+
+对应仍是当前扫描 ∩ 局部地图。看不见的墙进不了 \(H_t\)。
 
 ```bash
 cd experiments/day2_forecast_hessian
 python3 forecast_hessian.py
 ```
 
-依赖：`numpy`、`matplotlib`。
+## 两种维护（一次跑完）
 
-## 场景（写死在脚本里）
+| policy | 地图里有什么 | 像不像常见 SLAM |
+|--------|----------------|-----------------|
+| `union` | 窗口内每一帧的**完整扫描**取并集。后面 360° 再扫到门口，窗口里仍有一份拷贝 | 像。关键帧存整帧 |
+| `owned` | 点只挂在**第一次看见它的那一帧**上，再观测不刷新。那一帧滑出窗口，点就没了 | 不像默认实现；是 claim 额外需要的假设 |
 
-- 走廊沿世界 \(+Y\)，**门口/入口墙在 \(y=0\)**（法向 \(+Y\)），没有远处端面。
-- 车从 \(y=2.5\) 以 \(2\,\mathrm{m/s}\) 往 \(+Y\) 开，雷达 360°，量程 \(15\,\mathrm{m}\)。
-- FIFO 局部地图半径 \(8\,\mathrm{m}\)（**短于量程**）。
-- 对应规则：当前扫描里的点，**只有它还在局部地图里**才进入 \(H_t=\sum aa^\top\)。当前扫描看不见的墙，历史点进不了 \(H_t\)。
+看终端 summary：`union` 的 `pass` 才代表「改成真实大小关系后 claim 仍成立」。`owned` 过只能说明「不重插入时」成立。
 
-预测：匀速 \(\hat T_{t+1\mathrm{s}}\)，在该位姿上用 FIFO 再积一次 \(\hat H\)，弱轴 \(V_D\) 用来「保护」\(|n\cdot V_D|\ge\cos 60^\circ\) 且仍在当前扫描里的点（这里就是门口）。
+图：`out/forecast_lmin_union.png`、`out/forecast_lmin_owned.png`。
 
-## 你要看到的三件事
+## 三条判定（每个 policy 各算一次）
 
-1. **时间差：** 某段 \(t\)，\(\lambda_{\min}(H_t)\) FIFO 还大，但 \(\lambda_{\min}(\hat H_{t+1s})\) 已经塌。
-2. **看得见但地图没了：** 当前扫描仍有门口点，FIFO 已删门口 \(\Rightarrow\) \(H_t\) 塌；轴沿世界 \(+Y\)。
-3. **留下则不塌：** 同一拍按 \(V_D\) 把门口留在地图里，\(\lambda_{\min}(H_t)\) 不塌。阴影区 = 扫描有门口、FIFO 没有。
+1. \(\hat H_{t+1s}\) 比当前窗口 \(H_t\) 先塌
+2. 扫描里还有门口、窗口地图没有 \(\Rightarrow H_t\) 塌，轴沿 \(+Y\)
+3. 按预测 \(V_D\) 把门口留在匹配地图里，同一拍 \(H_t\) 不塌
 
-若 Verdict 里 `pass` 不是 `True`，这条 claim 在本玩具里不成立，先改几何，不要写论文。
-
-## 这还不是
-
-- 不是 Day 3（FIFO vs 共视点数 vs \(V_D\) 三条弹出规则的误差对比）。
-- 不是 Thorne ICRA 2025 的当前帧 \(\max\lambda_{\min}\) 子图；本脚本没有容量 \(N\) 下的当前贪心。
-- 不是 FAST-LIO。
+## 这还不是 Day 3 / Thorne / FAST-LIO
