@@ -1,0 +1,9 @@
+N_TRIALS=50 yaw=35.0 λ_imu=2.0 λ_nominal=960.0
+assoc mean=1.000
+γ full=0.992 gray=0.500 empty=-0.000
+MAE tunnel  IMU=0.561  empty=0.561  gray=0.571  full=0.053
+signed bias empty ICP=-0.043 IMU=-0.043
+ATE_y        0.558       0.558       0.556       0.316       0.405
+NEES          79.3        79.3        77.9         1.0        41.8
+after        0.216       0.216       0.215       0.075       0.157
+healthy      0.113       0.113       0.113       0.113       0.112
